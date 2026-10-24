@@ -39,6 +39,10 @@ COLLECTION_NAME = "code_travail"
 # Il attend les préfixes "query: " / "passage: " (gérés dans src/index.py).
 EMBED_MODEL = "intfloat/multilingual-e5-small"
 
+# "torch" (par défaut) : sentence-transformers. "onnx" : même modèle au format ONNX,
+# sans PyTorch, utilisé pour la mise en ligne (voir Dockerfile et src/index.py).
+EMBED_BACKEND = os.getenv("EMBED_BACKEND", "torch")
+
 TOP_K = int(os.getenv("TOP_K", "4"))
 MIN_SCORE = float(os.getenv("MIN_SCORE", "0.25"))
 

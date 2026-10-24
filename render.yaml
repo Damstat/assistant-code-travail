@@ -1,0 +1,15 @@
+# Configuration Render (https://render.com/docs/blueprint-spec) : un service web gratuit
+# construit à partir du Dockerfile. La clé GROQ_API_KEY se saisit dans le tableau de bord
+# (sync: false), elle n'est jamais écrite dans le dépôt.
+services:
+  - type: web
+    name: assistant-code-travail
+    runtime: docker
+    plan: free
+    region: frankfurt
+    healthCheckPath: /api/infos
+    envVars:
+      - key: GROQ_API_KEY
+        sync: false
+      - key: LLM_MODEL
+        value: openai/gpt-oss-120b

@@ -9,9 +9,14 @@ import json
 import time
 
 import chromadb
-from sentence_transformers import SentenceTransformer
+import numpy as np
 
-from src.config import CHROMA_DIR, CHUNKS_PATH, COLLECTION_NAME, EMBED_MODEL
+from src.config import CHROMA_DIR, CHUNKS_PATH, COLLECTION_NAME, EMBED_BACKEND, EMBED_MODEL
+
+# Version ONNX quantifiée (int8, 118 Mo) du même modèle e5-small, pour la mise en ligne :
+# elle tourne avec onnxruntime, sans PyTorch, et tient dans 512 Mo de RAM.
+ONNX_REPO = "Xenova/multilingual-e5-small"
+ONNX_FICHIER = "onnx/model_quantized.onnx"
 
 
 def prefixes(model_name):
@@ -26,13 +31,72 @@ def prefixes(model_name):
     return "", ""
 
 
+class ModeleOnnx:
+    """Même usage que SentenceTransformer (méthode encode), mais avec onnxruntime.
+
+    Reproduit le calcul de sentence-transformers pour e5 : moyenne des vecteurs
+    des tokens (sans compter le remplissage), puis normalisation à une longueur de 1.
+    Le découpage en tokens passe par sentencepiece (5 Mo) plutôt que par tokenizer.json,
+    qui occupe à lui seul près de 300 Mo de RAM une fois chargé.
+    """
+
+    # Numérotation de XLM-RoBERTa (base de e5) : 4 tokens spéciaux en tête,
+    # puis les ids de sentencepiece décalés de 1
+    DEBUT, REMPLISSAGE, FIN, INCONNU, DECALAGE = 0, 1, 2, 3, 1
+    LONGUEUR_MAX = 512
+
+    def __init__(self, repo=ONNX_REPO, fichier=ONNX_FICHIER):
+        import onnxruntime as ort
+        import sentencepiece as spm
+        from huggingface_hub import hf_hub_download
+
+        self.sp = spm.SentencePieceProcessor(model_file=hf_hub_download(repo, "sentencepiece.bpe.model"))
+        options = ort.SessionOptions()
+        options.enable_cpu_mem_arena = False  # moins de mémoire réservée d'avance
+        self.session = ort.InferenceSession(hf_hub_download(repo, fichier), options,
+                                            providers=["CPUExecutionProvider"])
+        self.entrees = {e.name for e in self.session.get_inputs()}
+
+    def tokens(self, texte):
+        """Ids des tokens d'un texte, encadrés par <s> et </s>, coupés à 512 au total."""
+        ids = [i + self.DECALAGE if i else self.INCONNU for i in self.sp.encode(texte)]
+        return [self.DEBUT] + ids[:self.LONGUEUR_MAX - 2] + [self.FIN]
+
+    def encode(self, textes, batch_size=32, normalize_embeddings=True, show_progress_bar=False):
+        paquets = []
+        for debut in range(0, len(textes), batch_size):
+            lots = [self.tokens(t) for t in textes[debut:debut + batch_size]]
+            longueur = max(len(l) for l in lots)
+            ids = np.full((len(lots), longueur), self.REMPLISSAGE, dtype=np.int64)
+            masque = np.zeros((len(lots), longueur), dtype=np.int64)
+            for n, l in enumerate(lots):
+                ids[n, :len(l)] = l
+                masque[n, :len(l)] = 1
+            flux = {"input_ids": ids, "attention_mask": masque}
+            if "token_type_ids" in self.entrees:
+                flux["token_type_ids"] = np.zeros_like(ids)
+            tokens = self.session.run(None, flux)[0]  # (textes, tokens, 384)
+            poids = masque[:, :, None].astype(np.float32)
+            paquets.append((tokens * poids).sum(axis=1) / poids.sum(axis=1))
+            if show_progress_bar:
+                print(f"  {min(debut + batch_size, len(textes))}/{len(textes)} chunks", end="\r")
+        vecteurs = np.vstack(paquets).astype(np.float32)
+        if normalize_embeddings:
+            vecteurs /= np.linalg.norm(vecteurs, axis=1, keepdims=True)
+        return vecteurs
+
+
 # Modèles déjà chargés, rangés par nom : on ne charge chaque modèle qu'une fois
 _MODELES = {}
 
 
 def charger_modele(model_name=EMBED_MODEL):
     """Charge le modèle d'embeddings une seule fois (téléchargé au premier appel)."""
+    if model_name not in _MODELES and EMBED_BACKEND == "onnx" and model_name == EMBED_MODEL:
+        _MODELES[model_name] = ModeleOnnx()
     if model_name not in _MODELES:
+        # Import ici : la version en ligne (EMBED_BACKEND=onnx) n'installe pas PyTorch
+        from sentence_transformers import SentenceTransformer
         try:
             # D'abord depuis le disque, sans contacter Hugging Face : plus rapide,
             # et ça marche même quand la connexion est coupée ou instable.

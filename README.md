@@ -99,11 +99,27 @@ python -m src.index
 # 4. Poser une question (sans argument : mode interactif)
 python -m src.cli "Votre question ici"
 
+# 4 bis. Ou bien l'interface web -> http://localhost:8000
+python -m src.web
+
 # 5. Lancer l'évaluation -> reports/eval_results.csv
 python -m src.evaluate
 ```
 
 Les étapes 1 à 3 ne se lancent qu'une fois (ou quand le corpus change). Les traces de chaque requête sont écrites dans `logs/traces.jsonl`.
+
+### Mise en ligne (Render, gratuit)
+
+La version en ligne est **allégée** pour tenir dans les 512 Mo de RAM de l'offre gratuite de Render : le même modèle e5-small tourne au format ONNX (`Xenova/multilingual-e5-small`, quantifié en int8) avec onnxruntime, sans PyTorch (`EMBED_BACKEND=onnx`, dépendances dans `requirements-web.txt`). Mesures sur 524 chunks : similarité cosinus moyenne de 0,996 avec les vecteurs PyTorch, même meilleur article sur 6 questions de test sur 7, et 300 à 370 Mo de RAM au lieu de plus de 600 Mo. Le `Dockerfile` construit la base vectorielle pendant la construction de l'image (`chroma_db/` n'est donc pas envoyé). Hugging Face Spaces n'est pas retenu : les Spaces Docker y demandent maintenant un abonnement payant.
+
+1. Pousser le code sur GitHub (Render construit l'image depuis le dépôt).
+2. Créer un compte sur https://render.com, puis *New > Web Service > Public Git Repository* et coller l'URL du dépôt.
+3. Choisir le langage **Docker**, la région **Frankfurt** et l'offre **Free**. Dans *Environment Variables*, ajouter `GROQ_API_KEY` (jamais dans le code).
+4. La construction prend 5 à 10 minutes (onglet *Logs*). L'application est ensuite accessible à l'adresse `https://assistant-code-travail.onrender.com` (ou une variante si le nom est pris).
+
+Le fichier `render.yaml` décrit la même configuration, pour un déploiement par *New > Blueprint* depuis un compte GitHub qui a accès au dépôt.
+
+Garde-fou de la version en ligne : chaque adresse IP est limitée à 10 questions par minute (variable `QUESTIONS_PAR_MINUTE`), pour protéger le quota gratuit de Groq. Le service gratuit se met en veille après 15 minutes sans visite ; la visite suivante le réveille en 1 minute environ.
 
 ## Structure du projet
 
