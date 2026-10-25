@@ -19,8 +19,14 @@ LIGNE = "-" * 70
 def afficher(resultat):
     """Affiche la réponse, puis les sources avec leur score, puis les mesures."""
     print(f"\n{LIGNE}\nRéponse :\n{resultat['reponse']}\n")
-    if resultat["hors_corpus"]:
+    if resultat.get("garde_fou") in ("injection", "trop_long"):
+        print(f"(Garde-fou : question bloquée, motif « {resultat['garde_fou']} ».)")
+    elif resultat["hors_corpus"]:
         print("(Question jugée hors du Code du Travail.)")
+    if resultat.get("garde_fou") == "donnees_personnelles":
+        print("(Garde-fou : données personnelles masquées avant l'envoi au LLM.)")
+    for outil in resultat.get("outils", []):
+        print(f"(Outil appelé par le LLM : {outil['nom']}({outil['arguments']}))")
     print("Sources consultées (de la plus proche à la moins proche) :")
     for numero, p in enumerate(resultat["passages"], start=1):
         print(f"  [{numero}] score {p['score']:.3f}  {p['titre']}  ({p['id']})")
