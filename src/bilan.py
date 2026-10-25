@@ -13,10 +13,10 @@ from collections import Counter
 
 from src.observability import TRACES_PATH
 
-# Tarif public de Groq pour llama-3.3-70b-versatile, en dollars par million de tokens.
+# Tarif public de Groq pour openai/gpt-oss-120b, en dollars par million de tokens.
 # Vérifier ces chiffres sur la page tarifs de Groq avant de les citer dans le rapport.
-PRIX_PUBLIC_ENTREE = 0.59
-PRIX_PUBLIC_SORTIE = 0.79
+PRIX_PUBLIC_ENTREE = 0.15
+PRIX_PUBLIC_SORTIE = 0.60
 
 
 def lire_traces(chemin=TRACES_PATH):
